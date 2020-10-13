@@ -30,6 +30,25 @@ spec:
         app: {{ template "pihole.name" . }}
         release: {{ .Release.Name }}
     spec:
+      {{- if .Values.antiaff.enabled }}
+      affinity:
+        podAntiAffinity:
+        {{- if .Values.antiaff.strict }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+        {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:  
+              labelSelector:
+        {{- end }}
+                matchExpressions:
+                - key: release
+                  operator: In
+                  values:
+                  - {{ .Values.antiaff.avoidRelease }}
+              topologyKey: "kubernetes.io/hostname"
+      {{- end }}
       dnsPolicy: "None"
       dnsConfig:
         nameservers:
@@ -50,6 +69,20 @@ spec:
             - containerPort: 5053
               name: cloudflared-udp
               protocol: UDP
+          {{- if .Values.doh.envVars }}
+          env:
+            {{- range $key, $value := .Values.doh.envVars }}
+          - name: {{ $key | quote }}
+            value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          livenessProbe:
+            exec:
+              command:
+              - "/usr/bin/nc"
+              - "-uzvw3"
+              - "localhost"
+              - "5053"
         {{- end }}
         - name: {{ .Chart.Name }}
           env:
@@ -129,6 +162,9 @@ spec:
           volumeMounts:
           - mountPath: /etc/pihole
             name: config
+            {{- if .Values.persistentVolumeClaim.subPath }}
+            subPath: {{ .Values.persistentVolumeClaim.subPath }}
+            {{- end }}
           - mountPath: /etc/dnsmasq.d/02-custom.conf
             name: custom-dnsmasq
             subPath: 02-custom.conf
@@ -174,6 +210,8 @@ spec:
         {{- if .Values.persistentVolumeClaim.enabled }}
         persistentVolumeClaim:
           claimName: {{ if .Values.persistentVolumeClaim.existingClaim }}{{ .Values.persistentVolumeClaim.existingClaim }}{{- else }}{{ template "pihole.fullname" . }}{{- end }}
+        {{- else if .Values.customVolumes.enabled }}
+{{- toYaml .Values.customVolumes.config | nindent 8 }}
         {{- else }}
         emptyDir: {}
         {{- end }}
